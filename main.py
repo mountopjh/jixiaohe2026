@@ -487,6 +487,12 @@ class BinApp(QApplication):
                 if latest_version and latest_version.strip('v') > current_version.strip('v'):
                     release_url = data.get("html_url", "")
                     
+                    # Try to find an .exe asset for direct download
+                    for asset in data.get("assets", []):
+                        if asset.get("name", "").endswith(".exe"):
+                            release_url = asset.get("browser_download_url", release_url)
+                            break
+                    
                     # Need to update UI in main thread
                     from PyQt6.QtCore import QMetaObject, Q_ARG, Qt
                     QMetaObject.invokeMethod(self, "on_update_found",
