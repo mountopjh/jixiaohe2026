@@ -1,7 +1,6 @@
 import requests
 import sqlite3
 import logging
-from playwright.sync_api import sync_playwright
 from data_manager import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -85,6 +84,7 @@ def query_cardbin_cn(card_number):
     """
     try:
         url = f"https://cardbin.cn/query/{card_number}.html"
+        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             # use headless mode
             browser = p.chromium.launch(headless=True)

@@ -6,13 +6,11 @@ from PyQt6.QtGui import QFont, QIcon
 import csv
 import os
 import logging
-import pandas as pd
+
 from query_engine import get_query_history, clear_failed_history
 from data_manager import get_db_connection, import_excel_to_db
 
-logger = logging.getLogger(__name__)
-
-class MainPanel(QWidget):
+logger = logging.getLogger(__name__)class MainPanel(QWidget):
     def __init__(self, signal_sender=None, parent=None):
         super().__init__(parent)
         self.signal_sender = signal_sender
@@ -214,6 +212,7 @@ class MainPanel(QWidget):
 
     def export_bin_db(self):
         try:
+            import pandas as pd
             conn = get_db_connection()
             # Rename columns to match Chinese directly in SQL
             query = '''

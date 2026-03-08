@@ -373,25 +373,35 @@ class BinApp(QApplication):
             sys.exit(0)
         
     def init_tray(self):
-        # Create a simple icon programmatically: white square, rounded corners, blue text '纪'
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        
-        # Draw white square with rounded corners
+        # Create Normal Icon (Blue text)
+        pixmap_normal = QPixmap(32, 32)
+        pixmap_normal.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap_normal)
         painter.setBrush(QColor("#FFFFFF"))
         painter.setPen(Qt.GlobalColor.transparent)
         painter.drawRoundedRect(0, 0, 32, 32, 8, 8)
-        
-        # Draw blue '纪' text
         from PyQt6.QtGui import QFont
         painter.setPen(QColor("#007ACC"))
         font = QFont("Microsoft YaHei", 18, QFont.Weight.Bold)
         painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "纪")
+        painter.drawText(pixmap_normal.rect(), Qt.AlignmentFlag.AlignCenter, "纪")
         painter.end()
+        self.icon_normal = QIcon(pixmap_normal)
+
+        # Create Gray Icon (Gray text)
+        pixmap_gray = QPixmap(32, 32)
+        pixmap_gray.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap_gray)
+        painter.setBrush(QColor("#E0E0E0")) # Grayish background
+        painter.setPen(Qt.GlobalColor.transparent)
+        painter.drawRoundedRect(0, 0, 32, 32, 8, 8)
+        painter.setPen(QColor("#888888")) # Gray text
+        painter.setFont(font)
+        painter.drawText(pixmap_gray.rect(), Qt.AlignmentFlag.AlignCenter, "纪")
+        painter.end()
+        self.icon_gray = QIcon(pixmap_gray)
         
-        self.tray_icon = QSystemTrayIcon(QIcon(pixmap), self)
+        self.tray_icon = QSystemTrayIcon(self.icon_normal, self)
         
         # Menu - styled for bigger, cleaner look
         self.tray_menu = QMenu()
@@ -634,8 +644,10 @@ class BinApp(QApplication):
         self.action_toggle.setText(label)
 
         if self.is_listening:
+            self.tray_icon.setIcon(self.icon_normal)
             self._start_mouse_listener()
         else:
+            self.tray_icon.setIcon(self.icon_gray)
             self._stop_mouse_listener()
             # Hide popup when turning off monitoring
             if self.popup.isVisible():
