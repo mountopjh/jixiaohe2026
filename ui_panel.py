@@ -16,7 +16,7 @@ class MainPanel(QWidget):
     def __init__(self, signal_sender=None, parent=None):
         super().__init__(parent)
         self.signal_sender = signal_sender
-        self.setWindowTitle("纪小盒 - 银行BIN码查询")
+        self.setWindowTitle("纪小盒-银行BIN码  登录账户：--")
         self.setMinimumSize(800, 500)
         self.setStyleSheet("""
             QWidget {
@@ -81,10 +81,7 @@ class MainPanel(QWidget):
         
         # Header
         header_layout = QHBoxLayout()
-        lbl_title = QLabel("纪小盒 - 银行BIN码查询")
-        lbl_title.setFont(QFont("Microsoft YaHei", 18, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("color: #007ACC;")
-        header_layout.addWidget(lbl_title)
+        # No inner title label - it's shown in the window title bar instead
         
         header_layout.addStretch()
         

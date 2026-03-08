@@ -169,6 +169,11 @@ class BinApp(QApplication):
         # Show login dialog first (silent failure model)
         self._show_login_dialog()
         
+        # Update main panel title to include the logged-in username
+        from bmob_client import get_current_username
+        uname = get_current_username() or "--"
+        self.main_panel.setWindowTitle(f"纪小盒-银行BIN码  登录账户：{uname}")
+        
         self.init_tray()
         self.restart_hotkey_listener()
      
