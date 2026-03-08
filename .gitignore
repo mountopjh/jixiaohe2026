@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+*.pyd
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Local database (not to be uploaded)
+bin_database.db
+
+# User settings (contains saved password - do NOT upload)
+settings.json
+
+# Logs
+*.log
+logs/
+
+# Playwright browsers cache
+playwright_cache/
+
+# Build outputs
+dist/
+build/
+*.spec
+*.exe
+
+# Temp
+*.tmp
+*.bak
+
+# OS
+Thumbs.db
+.DS_Store
