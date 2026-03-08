@@ -261,6 +261,11 @@ class BinApp(QApplication):
         lbl_sub.setObjectName("lbl_sub")
         layout.addWidget(lbl_sub)
         
+        lbl_error = QLabel("")
+        lbl_error.setStyleSheet("color: red; font-size: 12px; font-weight: bold;")
+        lbl_error.hide()
+        layout.addWidget(lbl_error)
+        
         layout.addSpacing(4)
         
         # Account row
@@ -306,8 +311,15 @@ class BinApp(QApplication):
         layout.addWidget(btn_login)
 
         def do_login():
+            lbl_error.hide()
             uname = input_user.text().strip()
             upass = input_pass.text().strip()
+            
+            if not uname or not upass:
+                lbl_error.setText("账号和密码不能为空！")
+                lbl_error.show()
+                return
+                
             ok = login(uname, upass)
             if ok:
                 # Save credentials only on success
@@ -323,16 +335,20 @@ class BinApp(QApplication):
                     QTimer.singleShot(500, self.show_main_panel)
                     
                 save_settings(self.settings)
-            dlg.accept()
+                dlg.accept()
+            else:
+                lbl_error.setText("登录失败：账号或密码错误！")
+                lbl_error.show()
             
         btn_login.clicked.connect(do_login)
         input_pass.returnPressed.connect(do_login)
         
         dlg.exec()
         
-        # If auth failed (wrong/deleted/banned), silently disable listening
+        # If dialog was closed without successful login, exit app
         if not is_authorized():
-            self.is_listening = False
+            import sys
+            sys.exit(0)
         
     def init_tray(self):
         # Create a simple icon programmatically: white square, rounded corners, blue text '纪'

@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo 初始化路径...
 cd /d "%~dp0"
 
