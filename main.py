@@ -159,6 +159,10 @@ class BinApp(QApplication):
         
         self.settings = load_settings()
         
+        # Ensure the SQLite database and tables exist before anything queries them
+        from data_manager import init_db
+        init_db()
+        
         self.signal_sender = GlobalSignalSender()
         self.signal_sender.show_popup_signal.connect(self.display_popup)
         

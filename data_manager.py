@@ -5,8 +5,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = 'bin_database.db'
-BANK_DIR = 'bank2025.2'
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(_HERE, 'bin_database.db')
+BANK_DIR = os.path.join(_HERE, 'bank2025.2')
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
