@@ -15,7 +15,8 @@ from PyQt6.QtCore import pyqtSlot, QTimer
 import requests
 
 class GlobalSignalSender(QObject):
-    show_popup_signal = pyqtSignal(str, object)
+    # (card_number, record, cursor_pos_as_QPoint)
+    show_popup_signal = pyqtSignal(str, object, object)
     
 class HotkeyRecorder(QLineEdit):
     def __init__(self, current_hotkey, parent=None):
@@ -164,7 +165,8 @@ class BinApp(QApplication):
         self.main_panel = MainPanel(self.signal_sender)
         self.popup = ResultPopup()
         
-        self.is_listening = True
+        self.is_listening = True    # True = monitoring mode enabled
+        self._mouse_listener = None  # pynput listener ref
         
         # Show login dialog first (silent failure model)
         self._show_login_dialog()
@@ -580,6 +582,7 @@ class BinApp(QApplication):
         return self.settings.get("hotkey", "f6")
             
     def restart_hotkey_listener(self):
+        """Bind the monitor-toggle hotkey and the ESC dismiss key."""
         try:
             keyboard.unhook_all_hotkeys()
             keyboard.unhook_all()
@@ -589,49 +592,99 @@ class BinApp(QApplication):
         def hotkey_loop():
             target_hotkey = self.get_current_hotkey()
             try:
-                keyboard.add_hotkey(target_hotkey, lambda: self.process_selection() if self.is_listening else None)
+                keyboard.add_hotkey(target_hotkey, self._toggle_monitoring)
             except Exception as e:
-                print(f"Failed to bind specific hotkey {target_hotkey}: {e}")
-                
-            # Keep the old ALT fallback but it's optional, 
-            # as user prefers standard binding now customizable `ctrl+alt+z`
-            def on_alt(e):
-                if e.event_type == keyboard.KEY_UP and e.name == 'alt' and self.is_listening:
-                    self.process_selection()
+                print(f"Failed to bind hotkey {target_hotkey}: {e}")
             
-            keyboard.hook_key('alt', on_alt)
+            # ESC dismisses popup from anywhere
+            def on_esc(e):
+                if e.event_type == keyboard.KEY_DOWN and e.name == 'esc':
+                    if self.popup.isVisible():
+                        self.popup.dismiss()
+            keyboard.hook(on_esc)
             keyboard.wait()
-            
+
         t = threading.Thread(target=hotkey_loop, daemon=True)
         t.start()
-        
-    def process_selection(self):
-        # Don't process if not authorized / listening is disabled silently
-        if not self.is_listening:
-            return
-        # 1. Backup current clipboard
-        old_clipboard = pyperclip.paste()
-        try:
-            # 2. Simulate Ctrl+C to copy selected text
-            keyboard.send('ctrl+c')
-            time.sleep(0.1) # wait for clipboard to update
-            
-            new_text = pyperclip.paste()
-            
-            # Extract digits - no length restriction (V1.4 requirement)
-            card_number = "".join(c for c in new_text if c.isdigit())
-            
-            if card_number:
-                record = perform_full_query(card_number)
-                self.signal_sender.show_popup_signal.emit(card_number, record)
-        except Exception as e:
-            pass  # Silent on error
-        finally:
-            # Restore clipboard
-            pyperclip.copy(old_clipboard)
 
-    def display_popup(self, card_number, record):
-        self.popup.show_result(card_number, record)
+    def _toggle_monitoring(self):
+        """Toggle monitoring mode on/off.  Update tray icon label."""
+        self.is_listening = not self.is_listening
+        label = "监听开关: 已开启" if self.is_listening else "监听开关: 已关闭"
+        self.action_toggle.setText(label)
+
+        if self.is_listening:
+            self._start_mouse_listener()
+        else:
+            self._stop_mouse_listener()
+            # Hide popup when turning off monitoring
+            if self.popup.isVisible():
+                self.popup.dismiss()
+
+    def _start_mouse_listener(self):
+        """Start pynput mouse listener to watch left-click events."""
+        if self._mouse_listener and self._mouse_listener.running:
+            return  # Already running
+        try:
+            from pynput import mouse as pynput_mouse
+            from PyQt6.QtCore import QPoint
+            def on_click(x, y, button, pressed):
+                if not pressed:
+                    return  # Only act on press, not release
+                if button != pynput_mouse.Button.left:
+                    return
+                if not self.is_listening:
+                    return
+                # Capture clipboard content AFTER the click is processed
+                # We wait briefly so Excel can update the selected cell text
+                import time
+                time.sleep(0.15)
+                try:
+                    import pyperclip
+                    text = pyperclip.paste()
+                    # Extract digits from whatever was already in clipboard
+                    # (cell click in Excel often does NOT auto-copy, so we try
+                    # a silent keyboard approach: read the cell directly via
+                    # pressing F2+Esc trick to keep selection, then copy with
+                    # Ctrl+C — but we suppress the animation by immediately
+                    # pressing Esc to cancel the cell copy border)
+                    keyboard.send('ctrl+c')
+                    time.sleep(0.08)
+                    new_text = pyperclip.paste()
+                    # Cancel copy border in Excel: send Esc to remove marching ants
+                    keyboard.send('esc')
+                    
+                    card_number = "".join(c for c in new_text if c.isdigit())
+                    if card_number:
+                        from PyQt6.QtCore import QPoint
+                        qpt = QPoint(int(x), int(y))
+                        record = perform_full_query(card_number)
+                        self.signal_sender.show_popup_signal.emit(card_number, record, qpt)
+                except Exception:
+                    pass
+
+            self._mouse_listener = pynput_mouse.Listener(on_click=on_click)
+            self._mouse_listener.daemon = True
+            self._mouse_listener.start()
+        except ImportError:
+            print("pynput not available; falling back to hotkey-only mode")
+
+    def _stop_mouse_listener(self):
+        """Stop the pynput mouse listener."""
+        if self._mouse_listener and self._mouse_listener.running:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+        self._mouse_listener = None
+
+    def display_popup(self, card_number, record, cursor_pos=None):
+        from PyQt6.QtCore import QPoint
+        if isinstance(cursor_pos, QPoint):
+            from PyQt6.QtGui import QCursor
+            self.popup.show_result(card_number, record, cursor_pos)
+        else:
+            self.popup.show_result(card_number, record)
         if self.main_panel.isVisible():
             self.main_panel.load_history()
 
