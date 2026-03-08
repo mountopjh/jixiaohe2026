@@ -30,7 +30,6 @@ echo.
 :: 打包主程序为单文件 exe，带窗口不弹黑框
 pyinstaller --noconfirm --onefile --windowed ^
   --name "纪小盒" ^
-  --add-data "bank2025.2;bank2025.2" ^
   main.py
 
 echo.
