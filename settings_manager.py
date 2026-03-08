@@ -1,7 +1,14 @@
 import json
 import os
+import sys
 
-SETTINGS_FILE = 'settings.json'
+if getattr(sys, 'frozen', False):
+    # 打包为EXE时：配置放在EXE同级目录
+    _CONFIG_DIR = os.path.dirname(sys.executable)
+else:
+    _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+
+SETTINGS_FILE = os.path.join(_CONFIG_DIR, 'settings.json')
 
 def load_settings():
     if not os.path.exists(SETTINGS_FILE):

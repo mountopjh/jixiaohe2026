@@ -1,11 +1,20 @@
 import os
 import re
+import sys
 import sqlite3
 import logging
 
 logger = logging.getLogger(__name__)
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
+# 当通过 PyInstaller 打包成 EXE 时，__file__ 指向临时解压目录（sys._MEIPASS），
+# 而不是 EXE 本身的位置。这里做兼容处理：
+if getattr(sys, 'frozen', False):
+    # 打包后：数据库放在 EXE 的同级目录
+    _HERE = os.path.dirname(sys.executable)
+else:
+    # 源码运行：数据库放在 data_manager.py 的同级目录
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+
 DB_PATH = os.path.join(_HERE, 'bin_database.db')
 BANK_DIR = os.path.join(_HERE, 'bank2025.2')
 

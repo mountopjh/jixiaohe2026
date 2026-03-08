@@ -1,4 +1,20 @@
 import sys
+import ctypes
+import crash_reporter
+sys.excepthook = crash_reporter.upload_crash_log_to_bmob
+
+# ── 单例保护：同一时刻只允许一个实例运行 ──────────────────────────────
+_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "NJXiaohe_SingleInstance_2026")
+if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    ctypes.windll.user32.MessageBoxW(
+        None,
+        "纪小盒 已经在运行中！\n\n请检查底部任务栏右侧的托盘图标（右键可打开面板）。",
+        "纪小盒",
+        0x40 | 0x1000  # MB_ICONINFORMATION | MB_SYSTEMMODAL
+    )
+    sys.exit(0)
+# ──────────────────────────────────────────────────────────────────────
+
 import threading
 import time
 import keyboard
