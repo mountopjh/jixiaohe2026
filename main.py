@@ -1,6 +1,10 @@
 import sys
 import ctypes
 import crash_reporter
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QPushButton, QSplashScreen, QProgressBar
+from PyQt6.QtGui import QIcon, QPixmap, QImage, QPainter, QColor, QFont, QPainterPath
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer, pyqtSlot
+
 sys.excepthook = crash_reporter.upload_crash_log_to_bmob
 
 # ── 单例保护：同一时刻只允许一个实例运行 ──────────────────────────────
@@ -19,16 +23,12 @@ import threading
 import time
 import keyboard
 import pyperclip
-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget, QDialog, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QPushButton
-from PyQt6.QtGui import QIcon, QPixmap, QImage, QPainter, QColor
-from PyQt6.QtCore import Qt, pyqtSignal, QObject
+import requests
 
 from ui_panel import MainPanel
 from ui_popup import ResultPopup
 from query_engine import perform_full_query, get_query_history
 from settings_manager import load_settings, save_settings
-from PyQt6.QtCore import pyqtSlot, QTimer
-import requests
 
 class GlobalSignalSender(QObject):
     # (card_number, record, cursor_pos_as_QPoint)
@@ -175,24 +175,111 @@ class BinApp(QApplication):
         
         self.settings = load_settings()
         
-        # Ensure the SQLite database and tables exist before anything queries them
-        from data_manager import init_db
-        init_db()
+        # --- Show Splash Screen ---
+        self._show_splash_screen()
         
         self.signal_sender = GlobalSignalSender()
         self.signal_sender.show_popup_signal.connect(self.display_popup)
         
+        # Delay initialization of heavy components briefly to let splash screen render
+        QTimer.singleShot(100, self._init_heavy_components)
+        
+    def _show_splash_screen(self):
+        pixmap = QPixmap(400, 250)
+        pixmap.fill(QColor("#2D2D30"))
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw nice border and title
+        painter.setPen(QColor("#4DB8FF"))
+        painter.drawRoundedRect(1, 1, 398, 248, 12, 12)
+        
+        font = QFont("Microsoft YaHei", 18, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "纪小盒 银行BIN查询 V1.6")
+        painter.end()
+        
+        self.splash = QSplashScreen(pixmap, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        
+        self.splash_progress = QProgressBar(self.splash)
+        self.splash_progress.setGeometry(50, 180, 300, 15)
+        self.splash_progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #1E1E1E;
+                color: transparent;
+                border: 1px solid #3E3E42;
+                border-radius: 7px;
+            }
+            QProgressBar::chunk {
+                background-color: #4DB8FF;
+                border-radius: 7px;
+            }
+        """)
+        
+        self.splash_label = QLabel(self.splash)
+        self.splash_label.setGeometry(50, 205, 300, 20)
+        self.splash_label.setStyleSheet("color: #AAAAAA; font-family: 'Microsoft YaHei'; font-size: 11px;")
+        self.splash_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.splash.show()
+        self.processEvents()
+
+    def _update_splash(self, value, text):
+        if hasattr(self, 'splash'):
+            self.splash_progress.setValue(value)
+            self.splash_label.setText(text)
+            self.processEvents()
+
+    def _init_heavy_components(self):
+        self._update_splash(10, "正在加载本地配置档...")
+        
+        # Ensure the SQLite database and tables exist before anything queries them
+        self._update_splash(30, "正在初始化并检查本地数据库...")
+        from data_manager import init_db
+        init_db()
+        
+        self._update_splash(50, "正在加载UI面板缓存...")
         self.main_panel = MainPanel(self.signal_sender)
         self.popup = ResultPopup()
         
         self.is_listening = True    # True = monitoring mode enabled
         self._mouse_listener = None  # pynput listener ref
         
-        # Show login dialog first (silent failure model)
-        self._show_login_dialog()
+        self._update_splash(80, "正在进行账号鉴权...")
+        
+        # Check login
+        from bmob_client import is_authorized
+        auto_logged_in = self._attempt_auto_login()
+        
+        self._update_splash(100, "加载完毕！")
+        
+        # Short delay to let user see 100%
+        QTimer.singleShot(400, lambda: self._finalize_startup(auto_logged_in))
+
+    def _attempt_auto_login(self):
+        from bmob_client import login
+        saved_user = self.settings.get("username", "")
+        saved_pass = self.settings.get("password", "")
+        if saved_user and saved_pass:
+            login(saved_user, saved_pass)
+            from bmob_client import is_authorized
+            return is_authorized()
+        return False
+
+    def _finalize_startup(self, auto_logged_in):
+        self.splash.finish(self.main_panel)
+        
+        if not auto_logged_in:
+            self._show_login_dialog()
+            
+        # Check authorization again after possible dialog
+        from bmob_client import is_authorized, get_current_username
+        if not is_authorized():
+            self.quit()
         
         # Update main panel title to include the logged-in username
-        from bmob_client import get_current_username
         uname = get_current_username() or "--"
         self.main_panel.setWindowTitle(f"纪小盒-银行BIN码  登录账户：{uname}")
         
@@ -200,17 +287,11 @@ class BinApp(QApplication):
         self.restart_hotkey_listener()
      
     def _show_login_dialog(self):
-        """Try auto-login from saved credentials. Show dialog only if not yet saved or auth fails."""
+        """Show dialog since auto-login failed or credentials missing."""
         from bmob_client import login, is_authorized
         
         saved_user = self.settings.get("username", "")
         saved_pass = self.settings.get("password", "")
-        
-        # Try auto-login if credentials already saved
-        if saved_user and saved_pass:
-            login(saved_user, saved_pass)
-            if is_authorized():
-                return  # Auto-login succeeded, skip dialog
         
         # Show login dialog
         dlg = QDialog()
@@ -690,8 +771,17 @@ class BinApp(QApplication):
                     if card_number:
                         from PyQt6.QtCore import QPoint
                         qpt = QPoint(int(x), int(y))
-                        record = perform_full_query(card_number)
-                        self.signal_sender.show_popup_signal.emit(card_number, record, qpt)
+                        # We pass signal_sender to support intermediary 'searching' popup before full result
+                        # Note: mouse click doesn't easily spawn a thread without potential issues here, 
+                        # but we can wrap it in one to avoid blocking UI immediately.
+                        import threading
+                        def _do_query():
+                            record = perform_full_query(card_number, self.signal_sender)
+                            # perform_full_query already emits intermediate searching signals.
+                            # But we still need to show the Final result when it's done.
+                            self.signal_sender.show_popup_signal.emit(card_number, record, qpt)
+                            
+                        threading.Thread(target=_do_query, daemon=True).start()
                 except Exception:
                     pass
 

@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout
 from PyQt6.QtCore import Qt, QPropertyAnimation, QPoint
 from PyQt6.QtGui import QFont, QCursor
 import ctypes
@@ -24,6 +24,11 @@ class ResultPopup(QWidget):
         self._already_shown = False   # tracks if popup is currently on screen
         self.init_ui()
         self.opacity_anim = QPropertyAnimation(self, b"windowOpacity")
+        
+        from PyQt6.QtCore import QTimer
+        self.auto_close_timer = QTimer(self)
+        self.auto_close_timer.setSingleShot(True)
+        self.auto_close_timer.timeout.connect(self.dismiss)
 
     def init_ui(self):
         self.setFixedSize(300, 160)
@@ -48,17 +53,42 @@ class ResultPopup(QWidget):
         v_layout.setContentsMargins(15, 15, 15, 15)
         v_layout.setSpacing(8)
         
-        # Title
+        # Title & Close Button Row
+        title_layout = QHBoxLayout()
         self.lbl_title = QLabel("BIN码查询结果")
         self.lbl_title.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
         self.lbl_title.setStyleSheet("color: #4DB8FF;")
         
+        from PyQt6.QtWidgets import QPushButton
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(24, 24)
+        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                color: #FF5C5C;
+            }
+        """)
+        self.btn_close.clicked.connect(self.dismiss)
+        
+        title_layout.addWidget(self.lbl_title)
+        title_layout.addStretch()
+        title_layout.addWidget(self.btn_close)
+        
         # Content labels
         self.lbl_card_no = QLabel("卡号: ")
         self.lbl_card_no.setFont(QFont("Consolas", 10))
+        self.lbl_card_no.setWordWrap(True)
         
         self.lbl_bank_name = QLabel("银行: ")
         self.lbl_bank_name.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        self.lbl_bank_name.setWordWrap(True)
         
         self.lbl_card_type = QLabel("类型: ")
         self.lbl_card_type.setFont(QFont("Microsoft YaHei", 10))
@@ -68,7 +98,7 @@ class ResultPopup(QWidget):
         self.lbl_source.setStyleSheet("color: #AAAAAA;")
         self.lbl_source.setAlignment(Qt.AlignmentFlag.AlignRight)
         
-        v_layout.addWidget(self.lbl_title)
+        v_layout.addLayout(title_layout)
         v_layout.addWidget(self.lbl_card_no)
         v_layout.addWidget(self.lbl_bank_name)
         v_layout.addWidget(self.lbl_card_type)
@@ -81,12 +111,34 @@ class ResultPopup(QWidget):
         """Update content and move near cursor without flicker.
         If already visible, just update content + move.  Do NOT fade out then back in.
         """
+        # Restart the 10-second auto-close timer every time we show/update the popup
+        self.auto_close_timer.start(10000)
+        
         # Update content
         self.lbl_card_no.setText(f"卡号: {card_number}")
-        if record:
+        
+        if record and record.get('_status') == 'searching':
+            # This is the new intermediary state where network query is ongoing
+            website_hint = "支付宝 或 Cardbin.cn"
+            self.lbl_bank_name.setText(f"正在 {website_hint} 深度查询...\n请稍后在程序面板中查看最终结果。")
+            self.lbl_card_type.setText("")
+            self.lbl_card_type.hide()
+            self.lbl_source.setText("")
+            self.container.setStyleSheet("""
+                #container {
+                    background-color: #2D2D30;
+                    border-radius: 12px;
+                    border: 1px solid #FFA500;
+                }
+                QLabel { color: #FFFFFF; }
+            """)
+        elif record and record.get('bank_name') and record.get('bank_name') != '未知' and record.get('bank_name') != '未匹配到结果':
+            # Valid local database hit
             self.lbl_bank_name.setText(f"银行: {record.get('bank_name', '未知')}")
+            self.lbl_card_type.show()
             self.lbl_card_type.setText(f"类型: {record.get('card_type', '未知')}")
-            self.lbl_source.setText(f"来源: {record.get('source', '网络查询')}")
+            # Hide source for final results to render cleaner
+            self.lbl_source.setText("")
             self.container.setStyleSheet("""
                 #container {
                     background-color: #2D2D30;
@@ -96,7 +148,9 @@ class ResultPopup(QWidget):
                 QLabel { color: #FFFFFF; }
             """)
         else:
+            # Complete failure (very rare now since we do fallback background search, but just in case)
             self.lbl_bank_name.setText("未查找到对应的归属地信息")
+            self.lbl_card_type.show()
             self.lbl_card_type.setText("类型: 未知")
             self.lbl_source.setText("")
             self.container.setStyleSheet("""
@@ -154,7 +208,8 @@ class ResultPopup(QWidget):
         self.move(x, y)
     
     def dismiss(self):
-        """Only way to dismiss the popup: ESC key."""
+        """Only way to dismiss the popup: ESC key, X button, or 10s timer."""
+        self.auto_close_timer.stop()
         self._already_shown = False
         self.opacity_anim.stop()
         self.opacity_anim.setDuration(200)

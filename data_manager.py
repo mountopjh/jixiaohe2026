@@ -166,6 +166,34 @@ def import_excel_to_db(file_path):
     
     return len(records)
 
+def get_chinese_bank_name(abbr_or_name):
+    """
+    Attempt to translate an English abbreviation or unrecognized name 
+    to a Chinese Bank name using the local DB.
+    """
+    if not abbr_or_name:
+        return "未知"
+        
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Try direct abbreviation match first
+    c.execute("SELECT bank_name FROM bin_data WHERE bank_abbr = ? LIMIT 1", (abbr_or_name,))
+    row = c.fetchone()
+    if row and row['bank_name']:
+        conn.close()
+        return row['bank_name']
+        
+    # Maybe it's a known name with some extra whitespace
+    c.execute("SELECT bank_name FROM bin_data WHERE bank_name LIKE ? LIMIT 1", (f"%{abbr_or_name}%",))
+    row = c.fetchone()
+    if row and row['bank_name']:
+        conn.close()
+        return row['bank_name']
+        
+    conn.close()
+    return abbr_or_name
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     init_db()

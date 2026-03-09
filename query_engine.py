@@ -57,12 +57,8 @@ def query_alipay_api(card_number):
             card_type_cn = type_map.get(card_type, card_type)
             
             # Try to get bank name from our DB mapped abbreviations
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("SELECT bank_name FROM bin_data WHERE bank_abbr = ? LIMIT 1", (bank_abbr,))
-            row = c.fetchone()
-            bank_name = row['bank_name'] if row else bank_abbr
-            conn.close()
+            from data_manager import get_chinese_bank_name
+            bank_name = get_chinese_bank_name(bank_abbr)
             
             # Assuming bin mapping directly as 'alipay-dynamic' or full card prefix isn't standard BIN.
             # But we can store it.
@@ -130,9 +126,12 @@ def query_cardbin_cn(card_number):
             browser.close()
             
             if data and data.get('bank_name'):
+                from data_manager import get_chinese_bank_name
+                raw_bankName = data.get('bank_name')
+                final_bankName = get_chinese_bank_name(raw_bankName)
                 return {
                     "bank_abbr": "UNKNOWN", 
-                    "bank_name": data.get('bank_name'),
+                    "bank_name": final_bankName,
                     "card_type": data.get('card_type', '未知'),
                     "bin_code": data.get('bin_code', card_number[:6]),
                     "card_length": data.get('card_length', len(card_number)),
@@ -215,13 +214,14 @@ def get_query_history(success_only=False):
     conn.close()
     return rows
 
-def perform_full_query(card_number):
+def perform_full_query(card_number, signal_sender=None):
     """
     Main entrypoint: 
     1. Check Local DB
-    2. Fallback to Alipay API
-    3. Fallback to cardbin.cn
-    4. Save to DB & History
+    2. If not found, show 'searching' UI if signal_sender provided
+    3. Fallback to Alipay API
+    4. Fallback to cardbin.cn
+    5. Save to DB & History
     """
     # Sanitize: extract all digits
     card_number = "".join([c for c in card_number if c.isdigit()])
@@ -230,8 +230,19 @@ def perform_full_query(card_number):
         
     record = query_local_db(card_number)
     
-    if not record:
-        # Step 2: Alipay API (always try since we lifted restrictions)
+    if record:
+        # Found locally immediately
+        if signal_sender:
+            pass # The caller handles showing the immediate popup
+    else:
+        # Not found locally, dispatch searching notification
+        if signal_sender:
+            from PyQt6.QtCore import QPoint
+            temp_record = {"_status": "searching", "source": "Alipay/Cardbin.cn API"}
+            # We don't have cursor pos here easily, but the popup logic handles None
+            signal_sender.show_popup_signal.emit(card_number, temp_record, None)
+            
+        # Step 2: Alipay API
         logger.info("Local DB miss. Trying Alipay API...")
         record = query_alipay_api(card_number)
             
@@ -251,6 +262,13 @@ def perform_full_query(card_number):
                 except Exception:
                     pass
             
+            # Send final result if we did a delayed search
+            if signal_sender:
+                # We do NOT pop it up again here as requirement says: 
+                # "如果BIN库没有，弹窗提示正在那个具体网站查询，结果在程序面板查看"
+                # So we just let the history update.
+                pass
+                
     # Always log into history, even if no result was found
     if not record:
         record = {
