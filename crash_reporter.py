@@ -1,7 +1,7 @@
 import sys
 import traceback
 import requests
-from bmob_client import BMOB_APP_ID, BMOB_REST_API_KEY, _username
+import bmob_client
 
 def upload_crash_log_to_bmob(exc_type, exc_value, exc_traceback):
     """
@@ -26,12 +26,12 @@ def upload_crash_log_to_bmob(exc_type, exc_value, exc_traceback):
         
         url = "https://api.bmobcloud.com/1/classes/ErrorLog"
         headers = {
-            "X-Bmob-Application-Id": BMOB_APP_ID,
-            "X-Bmob-REST-API-Key": BMOB_REST_API_KEY,
+            "X-Bmob-Application-Id": bmob_client.BMOB_APP_ID,
+            "X-Bmob-REST-API-Key": bmob_client.BMOB_REST_API_KEY,
             "Content-Type": "application/json"
         }
         
-        user_id = _username if _username else "Unknown/NotLoggedIn"
+        user_id = bmob_client.get_current_username() or "Unknown/NotLoggedIn"
         
         payload = {
             "error_message": str(exc_value),
@@ -40,6 +40,6 @@ def upload_crash_log_to_bmob(exc_type, exc_value, exc_traceback):
             "version": "V1.6"
         }
         
-        requests.post(url, json=payload, headers=headers, timeout=5, verify=False)
+        requests.post(url, json=payload, headers=headers, timeout=5)
     except Exception:
         pass # If crash reporter crashes, we just silently die

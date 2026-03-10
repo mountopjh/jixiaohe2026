@@ -18,3 +18,28 @@
 
 ## 💡 技术说明
 本项目依赖本地 SQLite 存储 (`bin_database.db`) 与阿里云支付宝 API 兜底，以及通过爬虫查询的云端兜底。跨设备静默登录配置通过同级目录下生成的 `settings.json` 进行管理与本地存储。
+
+---
+## [2026-03-11] 最近更新说明
+
+### 监听与快捷键
+- `F6` 现在用于 **切换监听开关**（开/关），不再直接触发查询。
+- 监听增加“双通道”：`pynput hook + 轮询兜底`，提升在 WPS 场景下的稳定性。
+- 新增“监听诊断面板”：可查看前台窗口信息、WPS判定结果、点击捕获与剪贴板提取日志。
+
+### WPS 捕获优化
+- 鼠标点击后不再仅做单次复制，改为多次重试（`Ctrl+C` / `Ctrl+Insert` / 延迟补读）。
+- 卡号提取改为“合法候选规则”，避免把杂乱文本拼成超长数字误判。
+
+### BIN 码库同步
+- 同步跟踪路径已改为 `bin_database.db`，不再使用 `bank2025.2`。
+- BIN 网页查看链接：
+  - `https://github.com/mountopjh/jixiaohe2026/blob/main/bin_database.db`
+- BIN 直链下载地址：
+  - `https://raw.githubusercontent.com/mountopjh/jixiaohe2026/main/bin_database.db`
+
+### 更新子菜单行为（版本 / BIN）
+- 托盘“更新”子菜单会同时检查“版本更新”和“BIN码库更新”两类状态。
+- 版本更新：发现新版本后展示版本号，并跳转 GitHub Release 下载对应 EXE。
+- BIN码库更新：发现 `bin_database.db` 新提交后，可在菜单中直接同步本地 BIN 文件。
+- 当只有 BIN 码库更新时，只同步 `bin_database.db`，不会触发 EXE 下载。

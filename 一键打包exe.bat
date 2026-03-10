@@ -27,10 +27,8 @@ echo.
 echo [提示] 正在打包，请稍候...
 echo.
 
-:: 打包主程序为单文件 exe，带窗口不弹黑框
-pyinstaller --noconfirm --onefile --windowed ^
-  --name "纪小盒" ^
-  main.py
+:: 打包主程序 (根据我们预设好的 .spec 配置文件，保证依赖不丢失)
+"venv\Scripts\python.exe" -m PyInstaller --clean -y "纪小盒.spec"
 
 echo.
 if exist "dist\纪小盒.exe" (

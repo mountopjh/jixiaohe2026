@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 *.pyd
 
+# Local markdown docs (keep locally, don't push to GitHub)
+*.md
+
 # Local-only documents (keep locally, don't push to GitHub)
 开发进度_task.md
 架构方案_implementation_plan.md
