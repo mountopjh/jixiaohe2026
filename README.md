@@ -1,5 +1,16 @@
 # 纪小盒 - 银行BIN码查询
 
+<div align="center">
+
+[![GitHub stars](https://img.shields.io/github/stars/mountopjh/jixiaohe2026?style=flat-square)](https://github.com/mountopjh/jixiaohe2026/stargazers)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Author](https://img.shields.io/badge/Author-mountopjh-blue.svg)](https://github.com/mountopjh)
+
+</div>
+
+---
+
+
 这是一款专用于查询银行卡 BIN 码及其归属机构的跨平台本地化工具。支持以下核心功能：
 - 桌面悬浮窗快捷键查询（选中卡号一键弹出结果）
 - 历史查询数据大盘面板
