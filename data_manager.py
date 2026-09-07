@@ -4,44 +4,19 @@ import re
 import shutil
 import sqlite3
 import stat
-import sys
 from typing import Iterable
+
+from app_paths import APP_DATA_DIR, BUNDLE_DIR, DB_PATH, LEGACY_DB_PATH, OLD_DB_PATHS, RUN_DIR, ensure_app_data_dir
 
 logger = logging.getLogger(__name__)
 
-if getattr(sys, "frozen", False):
-    _RUN_DIR = os.path.dirname(sys.executable)
-    _BUNDLE_DIR = getattr(sys, "_MEIPASS", _RUN_DIR)
-else:
-    _RUN_DIR = os.path.dirname(os.path.abspath(__file__))
-    _BUNDLE_DIR = _RUN_DIR
-
-APP_DIR_NAME = "Jixiaohe"
-if os.name == "nt":
-    _APPDATA_ROOT = os.getenv("APPDATA") or _RUN_DIR
-else:
-    _APPDATA_ROOT = os.path.expanduser("~")
-
-
-def _resolve_data_dir() -> str:
-    preferred = os.path.join(_APPDATA_ROOT, APP_DIR_NAME)
-    try:
-        os.makedirs(preferred, exist_ok=True)
-        return preferred
-    except Exception:
-        fallback = os.path.join(_RUN_DIR, "_jixiaohe_data")
-        os.makedirs(fallback, exist_ok=True)
-        return fallback
-
-
-DATA_DIR = _resolve_data_dir()
-DB_PATH = os.path.join(DATA_DIR, "bin_database.db")
-BANK_DIR = os.path.join(_RUN_DIR, "bank2025.2")
-_LEGACY_DB_PATH = os.path.join(_RUN_DIR, "bin_database.db")
+DATA_DIR = APP_DATA_DIR
+BANK_DIR = os.path.join(RUN_DIR, "bank2025.2")
+_LEGACY_DB_PATHS = (*OLD_DB_PATHS, LEGACY_DB_PATH)
 
 
 def _ensure_data_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    ensure_app_data_dir()
 
 
 def _ensure_db_writable() -> None:
@@ -56,9 +31,9 @@ def _ensure_db_writable() -> None:
 
 def _seed_db_candidates() -> Iterable[str]:
     # Preferred: bundled in one-file EXE resources.
-    yield os.path.join(_BUNDLE_DIR, "bin_database.db")
+    yield os.path.join(BUNDLE_DIR, "bin_database.db")
     # Dev fallback.
-    yield os.path.join(_RUN_DIR, "bin_database.db")
+    yield os.path.join(RUN_DIR, "bin_database.db")
 
 
 def ensure_local_db_ready() -> None:
@@ -69,12 +44,13 @@ def ensure_local_db_ready() -> None:
 
     _ensure_data_dir()
 
-    # Migration path: if legacy DB exists beside exe, keep user data.
-    if os.path.exists(_LEGACY_DB_PATH) and _LEGACY_DB_PATH != DB_PATH:
-        shutil.copy2(_LEGACY_DB_PATH, DB_PATH)
-        _ensure_db_writable()
-        logger.info("Migrated legacy DB to %s", DB_PATH)
-        return
+    # Migration path: if legacy DB exists, keep user data without writing back.
+    for legacy_path in _LEGACY_DB_PATHS:
+        if os.path.exists(legacy_path) and os.path.abspath(legacy_path) != os.path.abspath(DB_PATH):
+            shutil.copy2(legacy_path, DB_PATH)
+            _ensure_db_writable()
+            logger.info("Migrated legacy DB from %s to %s", legacy_path, DB_PATH)
+            return
 
     for candidate in _seed_db_candidates():
         if os.path.exists(candidate):

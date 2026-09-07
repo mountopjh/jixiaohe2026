@@ -1,27 +1,49 @@
 import json
 import os
-import sys
+import tempfile
+from typing import Any
 
-if getattr(sys, 'frozen', False):
-    # 打包为EXE时：配置放在EXE同级目录
-    _CONFIG_DIR = os.path.dirname(sys.executable)
-else:
-    _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+from app_paths import LEGACY_SETTINGS_PATH, OLD_SETTINGS_PATHS, SETTINGS_PATH, ensure_app_data_dir
 
-SETTINGS_FILE = os.path.join(_CONFIG_DIR, 'settings.json')
 
-def load_settings():
-    if not os.path.exists(SETTINGS_FILE):
-        return {"hotkey": "f6"}
+def _load_json_dict(path: str) -> dict[str, Any] | None:
+    if not os.path.exists(path):
+        return None
     try:
-        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except:
-        return {"hotkey": "f6"}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
-def save_settings(settings):
+
+def load_settings() -> dict[str, Any]:
+    settings = _load_json_dict(SETTINGS_PATH)
+    if settings is not None:
+        return settings
+
+    for legacy_path in (*OLD_SETTINGS_PATHS, LEGACY_SETTINGS_PATH):
+        if os.path.abspath(legacy_path) == os.path.abspath(SETTINGS_PATH):
+            continue
+        legacy_settings = _load_json_dict(legacy_path)
+        if legacy_settings is not None:
+            save_settings(legacy_settings)
+            return legacy_settings
+
+    return {}
+
+
+def save_settings(settings: dict[str, Any]) -> None:
+    if not isinstance(settings, dict):
+        settings = {}
+
+    data_dir = ensure_app_data_dir()
+    fd, tmp_path = tempfile.mkstemp(prefix="settings_", suffix=".json", dir=data_dir, text=True)
     try:
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(settings, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"Error saving settings: {e}")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, SETTINGS_PATH)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)

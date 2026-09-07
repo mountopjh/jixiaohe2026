@@ -1,8 +1,9 @@
-PyQt6
+PyQt6==6.8.1
+PyQt6-Qt6==6.8.2
 keyboard
 pyperclip
-playwright
 requests
-pynput==1.8.1
+pynput
 pandas
 openpyxl
+playwright

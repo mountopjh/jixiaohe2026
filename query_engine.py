@@ -332,12 +332,6 @@ def perform_full_query(card_number: str, signal_sender=None) -> Optional[Dict[st
             if not record.get("card_length"):
                 record["card_length"] = len(card_number)
             save_new_bin_to_db(record)
-            try:
-                from bmob_client import upload_new_bin
-
-                upload_new_bin(record)
-            except Exception:
-                pass
 
     if not record:
         record = {

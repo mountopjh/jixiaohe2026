@@ -5,7 +5,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ==========================================
-echo Build one-file EXE to project root
+echo Build versioned one-file EXE
 echo ==========================================
 
 where python >nul 2>nul
@@ -16,6 +16,13 @@ if errorlevel 1 (
 
 set "VENV_DIR=.build_venv"
 set "PY=%VENV_DIR%\Scripts\python.exe"
+set "RELEASE_DIR=%cd%\BankBin_Releases"
+
+if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
+if errorlevel 1 (
+  echo [ERROR] Failed to create release directory: %RELEASE_DIR%
+  exit /b 1
+)
 
 if not exist "%PY%" goto :create_env
 
@@ -86,34 +93,33 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if exist ".\Jixiaohe.exe" del /f /q ".\Jixiaohe.exe"
 if exist ".\build" rmdir /s /q ".\build"
 
-set "MD_ADD_DATA="
-for %%F in (*.md) do (
-  if exist "%%~fF" (
-    set "MD_ADD_DATA=!MD_ADD_DATA! --add-data=%%~nxF:."
-  )
+set "BUILD_SEQ="
+for /f %%N in ('%PY% -c "import os,re,sys; nums=[int(m.group(1)) for name in os.listdir(sys.argv[1]) if (m:=re.fullmatch(r'BankBin_(\d+)\.exe', name, re.I))]; print(f'{max(nums, default=0) + 1:03d}')" "%RELEASE_DIR%"') do set "BUILD_SEQ=%%N"
+if not defined BUILD_SEQ (
+  echo [ERROR] Failed to determine the next build sequence.
+  exit /b 1
 )
 
-echo [INFO] MD add-data args: !MD_ADD_DATA!
+set "BUILD_NAME=BankBin_!BUILD_SEQ!"
+set "BANKBIN_BUILD_NAME=!BUILD_NAME!"
 
-echo [INFO] Building EXE...
+echo [INFO] Building !BUILD_NAME!.exe...
 "%PY%" -m PyInstaller ^
   --clean ^
   --noconfirm ^
-  --onefile ^
-  --windowed ^
-  --name "Jixiaohe" ^
-  --add-data=bin_database.db:. ^
-  !MD_ADD_DATA! ^
-  --distpath "." ^
+  --distpath "%RELEASE_DIR%" ^
   --workpath ".\build" ^
-  --specpath "." ^
-  ".\main.py"
+  ".\BankBin.spec"
 
-if exist ".\Jixiaohe.exe" (
-  echo [OK] Build done: %cd%\Jixiaohe.exe
+if errorlevel 1 (
+  echo [ERROR] Build failed.
+  exit /b 1
+)
+
+if exist "%RELEASE_DIR%\!BUILD_NAME!.exe" (
+  echo [OK] Build done: %RELEASE_DIR%\!BUILD_NAME!.exe
 ) else (
   echo [ERROR] Build failed.
   exit /b 1

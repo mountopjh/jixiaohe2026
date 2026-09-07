@@ -1,45 +1,32 @@
-# Python
+# Python caches
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyc
-*.pyd
 
-# Local markdown docs (keep locally, don't push to GitHub)
-*.md
-
-# Local-only documents (keep locally, don't push to GitHub)
-开发进度_task.md
-架构方案_implementation_plan.md
-
-# Virtual environment
-venv/
+# Virtual environments
 .venv/
+venv/
 env/
+.build_venv/
 
-# Local database (not to be uploaded)
-bin_database.db
-
-# User settings (contains saved password - do NOT upload)
+# Runtime data and logs
 settings.json
-
-# Logs
+crash_report.log
 *.log
 logs/
 
-# Playwright browsers cache
-playwright_cache/
-
-# Build outputs
-dist/
+# Build caches and packaged executables
 build/
-*.spec
+dist/
+BankBin_Releases/
 *.exe
 
-# Temp
+# Tool caches and temporary files
+.pytest_cache/
+playwright_cache/
 *.tmp
 *.bak
 
-# OS
+# OS metadata
 Thumbs.db
 .DS_Store

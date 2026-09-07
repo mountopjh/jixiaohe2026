@@ -7,6 +7,7 @@ import threading
 import time
 import webbrowser
 from ctypes import wintypes
+from datetime import datetime
 
 import crash_reporter
 import keyboard
@@ -30,18 +31,20 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from bmob_client import get_current_username, is_authorized, login, login_with_status, logout
 from data_manager import DB_PATH
 from panels.registry import build_default_registry
 from query_engine import clear_all_history, get_query_history, perform_full_query
 from settings_manager import load_settings, save_settings
 from ui_popup import ResultPopup
 
-sys.excepthook = crash_reporter.upload_crash_log_to_bmob
+sys.excepthook = crash_reporter.write_crash_log
 
-APP_VERSION = "v1.6"
+APP_NAME = "BankBin"
+APP_VERSION = "v1.7.0"
 HOTKEY_DEFAULT = "f6"
-GITHUB_REPO = "mountopjh/jixiaohe2026"
+DEFAULT_LOGIN_USERNAME = "bljw"
+DEFAULT_LOGIN_PASSWORD = "89625727"
+GITHUB_REPO = "mountopjh/BankBin"
 GITHUB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_COMMITS_API = f"https://api.github.com/repos/{GITHUB_REPO}/commits"
 BIN_TRACK_PATH = "bin_database.db"
@@ -50,12 +53,31 @@ GITHUB_BIN_WEB_URL = f"https://github.com/{GITHUB_REPO}/blob/main/{BIN_TRACK_PAT
 UPDATE_INTERVAL_MS = 5 * 60 * 1000
 
 
-_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "NJXiaohe_SingleInstance_2026")
+def format_now_seconds() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_timestamp_seconds(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_iso_seconds(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "未知时间"
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        text = text.replace("T", " ").replace("Z", "")
+        return text[:19] if len(text) >= 19 else text
+
+
+_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "BankBin_SingleInstance_2026")
 if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
     ctypes.windll.user32.MessageBoxW(
         None,
         "程序已在运行中。\n请先关闭已打开的程序窗口后再启动。",
-        "纪小盒 BIN 查询",
+        APP_NAME,
         0x40 | 0x1000,
     )
     sys.exit(0)
@@ -66,85 +88,6 @@ class GlobalSignalSender(QObject):
     show_popup_signal = pyqtSignal(str, object, object)
 
 
-class ChangePasswordDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("修改密码")
-        self.setFixedSize(340, 190)
-        self.setStyleSheet(
-            """
-            QDialog { background-color: #1E1E1E; color: #FFFFFF; }
-            QLineEdit {
-                background-color: #2D2D30;
-                border: 1px solid #3E3E42;
-                color: #FFFFFF;
-                padding: 6px;
-                border-radius: 4px;
-            }
-            QPushButton {
-                background-color: #007ACC;
-                color: white;
-                border: none;
-                padding: 6px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #1C97EA; }
-            """
-        )
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
-
-        self.input_old = QLineEdit()
-        self.input_old.setEchoMode(QLineEdit.EchoMode.Password)
-        self.input_old.setPlaceholderText("旧密码")
-        layout.addWidget(self.input_old)
-
-        self.input_new = QLineEdit()
-        self.input_new.setEchoMode(QLineEdit.EchoMode.Password)
-        self.input_new.setPlaceholderText("新密码")
-        layout.addWidget(self.input_new)
-
-        self.input_confirm = QLineEdit()
-        self.input_confirm.setEchoMode(QLineEdit.EchoMode.Password)
-        self.input_confirm.setPlaceholderText("确认新密码")
-        layout.addWidget(self.input_confirm)
-
-        row = QHBoxLayout()
-        row.addStretch()
-        btn_save = QPushButton("保存")
-        btn_cancel = QPushButton("取消")
-        row.addWidget(btn_save)
-        row.addWidget(btn_cancel)
-        layout.addLayout(row)
-
-        btn_save.clicked.connect(self._do_change)
-        btn_cancel.clicked.connect(self.reject)
-
-    def _do_change(self):
-        old_password = self.input_old.text().strip()
-        new_password = self.input_new.text().strip()
-        confirm = self.input_confirm.text().strip()
-
-        if not old_password or not new_password:
-            QMessageBox.warning(self, "提示", "请输入完整密码")
-            return
-        if new_password != confirm:
-            QMessageBox.warning(self, "提示", "两次输入的新密码不一致")
-            return
-
-        from bmob_client import change_password
-
-        ok = change_password(old_password, new_password)
-        if ok:
-            QMessageBox.information(self, "完成", "密码已修改")
-            self.accept()
-        else:
-            QMessageBox.warning(self, "失败", "密码修改失败，请检查旧密码")
-
-
 class LoginDialog(QDialog):
     def __init__(self, default_username: str = "", default_password: str = "", history=None, parent=None):
         super().__init__(parent)
@@ -152,13 +95,15 @@ class LoginDialog(QDialog):
         self.setFixedSize(390, 270)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
 
-        self._history_map: dict[str, str] = {}
+        self._history_users: list[str] = []
         history = history or []
         for item in history:
-            username = str(item.get("username", "")).strip()
-            password = str(item.get("password", ""))
-            if username and username not in self._history_map:
-                self._history_map[username] = password
+            if isinstance(item, dict):
+                username = str(item.get("username", "")).strip()
+            else:
+                username = str(item or "").strip()
+            if username and username not in self._history_users:
+                self._history_users.append(username)
 
         self.setStyleSheet(
             """
@@ -206,7 +151,7 @@ class LoginDialog(QDialog):
         layout.setContentsMargins(30, 24, 30, 24)
         layout.setSpacing(10)
 
-        title = QLabel("纪小盒 BIN 查询")
+        title = QLabel(APP_NAME)
         title.setObjectName("title")
         sub = QLabel("请输入账号与密码")
         sub.setObjectName("sub")
@@ -217,16 +162,19 @@ class LoginDialog(QDialog):
         self.input_user = QComboBox()
         self.input_user.setEditable(True)
         self.input_user.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        for username in self._history_map.keys():
+        for username in self._history_users:
             self.input_user.addItem(username)
-        if default_username and default_username not in self._history_map:
+        if default_username and default_username not in self._history_users:
             self.input_user.addItem(default_username)
         self.input_user.setCurrentText(default_username)
+        if self.input_user.lineEdit() is not None:
+            self.input_user.lineEdit().setPlaceholderText("账号")
         self.input_user.currentTextChanged.connect(self._on_user_changed)
 
-        self.input_pass = QLineEdit(default_password)
+        self.input_pass = QLineEdit()
         self.input_pass.setEchoMode(QLineEdit.EchoMode.Password)
         self.input_pass.setPlaceholderText("密码")
+        self.input_pass.setText(default_password)
         self.btn_eye = QPushButton("")
         self.btn_eye.setObjectName("eye")
         self.btn_eye.setCheckable(True)
@@ -263,9 +211,7 @@ class LoginDialog(QDialog):
         self.input_pass.returnPressed.connect(self._do_accept)
 
     def _on_user_changed(self, username: str):
-        username = (username or "").strip()
-        if username and username in self._history_map:
-            self.input_pass.setText(self._history_map[username])
+        self.input_pass.clear()
 
     def _load_eye_icon(self, names):
         for name in names:
@@ -464,7 +410,7 @@ class LoadingDialog(QDialog):
         percent = max(0, min(100, int(percent)))
         self.progress.setValue(percent)
         self.lbl_status.setText(message)
-        line = f"[{time.strftime('%H:%M:%S')}] {message}"
+        line = f"[{format_now_seconds()}] {message}"
         if file_name:
             line += f" -> {file_name}"
         self.log.append(line)
@@ -634,6 +580,7 @@ class BinApp(QApplication):
         self._loading.update_step(8, "加载配置", "settings.json")
         self.settings = load_settings() or {}
         self._normalize_settings()
+        save_settings(self.settings)
         self.hotkey = self._normalize_hotkey(self.settings.get("hotkey", HOTKEY_DEFAULT))
         self.is_listening = bool(self.settings.get("listen_enabled", True))
 
@@ -642,18 +589,13 @@ class BinApp(QApplication):
         self.main_panel = self.panel_registry.get_primary_widget()
         self.popup = ResultPopup()
 
-        self._loading.update_step(38, "校验账号", "bmob")
-        if not self._attempt_auto_login():
-            self._loading.hide()
-            if not self._show_login_dialog():
-                self.quit()
-                return
-            self._loading.show()
-            self.processEvents()
-
-        if not is_authorized():
+        self._loading.update_step(38, "准备登录", "local")
+        self._loading.hide()
+        if not self._show_login_dialog():
             self.quit()
             return
+        self._loading.show()
+        self.processEvents()
 
         self._loading.update_step(58, "应用首次运行策略", "query_history")
         self._apply_first_run_policy()
@@ -670,8 +612,24 @@ class BinApp(QApplication):
         QTimer.singleShot(350, self._loading.close)
 
     def _normalize_settings(self):
-        if not isinstance(self.settings.get("login_history"), list):
-            self.settings["login_history"] = []
+        history = self.settings.get("login_history", [])
+        normalized_history = []
+        seen_users = set()
+        if isinstance(history, list):
+            for item in history:
+                if isinstance(item, dict):
+                    username = str(item.get("username", "")).strip()
+                else:
+                    username = str(item or "").strip()
+                if not username or username in seen_users:
+                    continue
+                normalized_history.append({"username": username})
+                seen_users.add(username)
+                if len(normalized_history) >= 20:
+                    break
+        self.settings["login_history"] = normalized_history
+        for key in ("password", "firebase_id_token", "firebase_refresh_token", "firebase_local_id"):
+            self.settings.pop(key, None)
         if not self.settings.get("hotkey"):
             self.settings["hotkey"] = HOTKEY_DEFAULT
         if "listen_enabled" not in self.settings:
@@ -680,57 +638,41 @@ class BinApp(QApplication):
     def _normalize_hotkey(self, value: str) -> str:
         return HotkeySettingDialog.normalize_hotkey_text(value)
 
-    def _remember_login_history(self, username: str, password: str):
+    def _remember_login_history(self, username: str):
         username = (username or "").strip()
         if not username:
             return
 
         history = self.settings.get("login_history", [])
-        new_history = [{"username": username, "password": password}]
+        new_history = [{"username": username}]
         for item in history:
-            old_user = str(item.get("username", "")).strip()
-            old_pass = str(item.get("password", ""))
+            if isinstance(item, dict):
+                old_user = str(item.get("username", "")).strip()
+            else:
+                old_user = str(item or "").strip()
             if not old_user or old_user == username:
                 continue
-            new_history.append({"username": old_user, "password": old_pass})
+            new_history.append({"username": old_user})
             if len(new_history) >= 20:
                 break
 
         self.settings["login_history"] = new_history
         self.settings["username"] = username
-        self.settings["password"] = password
-
-    def _attempt_auto_login(self) -> bool:
-        saved_user = self.settings.get("username", "")
-        saved_pass = self.settings.get("password", "")
-        if not saved_user or not saved_pass:
-            return False
-        return bool(login(saved_user, saved_pass) and is_authorized())
+        for key in ("password", "firebase_id_token", "firebase_refresh_token", "firebase_local_id"):
+            self.settings.pop(key, None)
 
     def _show_login_dialog(self) -> bool:
-        user = self.settings.get("username", "")
-        password = self.settings.get("password", "")
+        user = DEFAULT_LOGIN_USERNAME
         history = self.settings.get("login_history", [])
 
-        while True:
-            dlg = LoginDialog(user, password, history)
-            code = dlg.exec()
-            if code != QDialog.DialogCode.Accepted:
-                return False
+        dlg = LoginDialog(user, DEFAULT_LOGIN_PASSWORD, history)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
 
-            user, password = dlg.credentials()
-            ok, status = login_with_status(user, password)
-            if ok:
-                self._remember_login_history(user, password)
-                save_settings(self.settings)
-                return True
-
-            status_message = {
-                "network_error": "网络无法连接",
-                "account_not_exist": "账号不存在",
-                "password_error": "密码错误",
-            }.get(status, "登录失败，请稍后重试")
-            QMessageBox.warning(None, "登录失败", status_message)
+        user, _password = dlg.credentials()
+        self._remember_login_history(user)
+        save_settings(self.settings)
+        return True
 
     def _apply_first_run_policy(self):
         if not self.settings.get("first_run_done", False):
@@ -739,14 +681,14 @@ class BinApp(QApplication):
             save_settings(self.settings)
 
     def _refresh_user_context(self):
-        username = get_current_username() or "--"
+        username = str(self.settings.get("username", "") or DEFAULT_LOGIN_USERNAME).strip()
         if self.main_panel is not None:
-            self.main_panel.setWindowTitle(f"纪小盒银行 BIN 查询 - 当前账号：{username}")
+            self.main_panel.setWindowTitle(f"{APP_NAME} - 当前账号：{username}")
         if hasattr(self, "action_user"):
             self.action_user.setText(f"账号：{username}")
 
     def _debug_log_listener(self, message: str):
-        line = f"[{time.strftime('%H:%M:%S')}] {message}"
+        line = f"[{format_now_seconds()}] {message}"
         with self._debug_lock:
             self._listener_debug_seq += 1
             self._listener_debug_logs.append((self._listener_debug_seq, line))
@@ -765,7 +707,7 @@ class BinApp(QApplication):
     def _get_listener_debug_snapshot(self):
         hwnd, title, class_name, exe_name = self._get_foreground_window_info()
         is_wps_sheet = self._is_wps_window_info(title, class_name, exe_name)
-        click_time = "-" if not self._last_click_ts else time.strftime("%H:%M:%S", time.localtime(self._last_click_ts))
+        click_time = "-" if not self._last_click_ts else format_timestamp_seconds(self._last_click_ts)
         return {
             "is_listening": self.is_listening,
             "polling_active": self._mouse_poll_timer.isActive(),
@@ -790,8 +732,8 @@ class BinApp(QApplication):
         painter.setPen(Qt.GlobalColor.transparent)
         painter.drawRoundedRect(0, 0, 32, 32, 8, 8)
         painter.setPen(QColor(text_color))
-        painter.setFont(QFont("Microsoft YaHei", 16, QFont.Weight.Bold))
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "纪")
+        painter.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Bin")
         painter.end()
         return QIcon(pixmap)
 
@@ -825,12 +767,12 @@ class BinApp(QApplication):
         )
 
         self.account_menu = QMenu("当前账号", self.tray_menu)
-        self.action_user = self.account_menu.addAction(f"账号：{get_current_username() or '--'}")
+        self.action_user = self.account_menu.addAction(
+            f"账号：{self.settings.get('username', DEFAULT_LOGIN_USERNAME) or '--'}"
+        )
         self.action_user.setEnabled(False)
         self.action_switch_account = self.account_menu.addAction("切换账号")
         self.action_switch_account.triggered.connect(self.switch_account)
-        self.action_change_pw = self.account_menu.addAction("修改密码")
-        self.action_change_pw.triggered.connect(self.open_change_password)
         self.tray_menu.addMenu(self.account_menu)
 
         self.tray_menu.addSeparator()
@@ -890,7 +832,7 @@ class BinApp(QApplication):
 
         self.tray_menu.addSeparator()
 
-        self.about_menu = QMenu(f"关于 - 纪小盒 BIN 查询 {APP_VERSION.upper()}", self.tray_menu)
+        self.about_menu = QMenu(f"关于 - {APP_NAME} {APP_VERSION.upper()}", self.tray_menu)
         self.act_curr_ver = self.about_menu.addAction(f"当前版本: {APP_VERSION.upper()}")
         self.act_curr_ver.setEnabled(False)
         self.about_menu.addSeparator()
@@ -898,7 +840,7 @@ class BinApp(QApplication):
         self.act_feedback.triggered.connect(self.copy_feedback_wechat)
         self.tray_menu.addMenu(self.about_menu)
 
-        self.action_time = self.tray_menu.addAction("更新时间: 2026-03-11")
+        self.action_time = self.tray_menu.addAction("更新时间: 2026-09-07")
         self.action_time.setEnabled(False)
 
         self.tray_menu.addSeparator()
@@ -907,7 +849,7 @@ class BinApp(QApplication):
         self.action_quit.triggered.connect(self.quit_app)
 
         self.tray_icon.setContextMenu(self.tray_menu)
-        self.tray_icon.setToolTip("纪小盒银行 BIN 查询")
+        self.tray_icon.setToolTip(APP_NAME)
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
 
@@ -1076,7 +1018,7 @@ class BinApp(QApplication):
         if notified_sha != sha:
             self.settings["last_notified_bin_sha"] = sha
             save_settings(self.settings)
-            update_time = commit_date.replace("T", " ").replace("Z", "") if commit_date else "未知时间"
+            update_time = format_iso_seconds(commit_date)
             msg_preview = message.split("\n", 1)[0] if message else ""
             self.tray_icon.showMessage(
                 "BIN码库更新",
@@ -1191,7 +1133,6 @@ class BinApp(QApplication):
         threading.Thread(target=_do_query, daemon=True).start()
 
     def switch_account(self):
-        logout()
         if not self._show_login_dialog():
             QMessageBox.information(None, "提示", "未重新登录，程序将退出。")
             self.quit_app()
@@ -1200,9 +1141,6 @@ class BinApp(QApplication):
         if self.main_panel is not None:
             self.main_panel.load_history()
         self.show_main_panel()
-
-    def open_change_password(self):
-        ChangePasswordDialog().exec()
 
     def open_hotkey_setting_dialog(self):
         dlg = HotkeySettingDialog(self.hotkey)

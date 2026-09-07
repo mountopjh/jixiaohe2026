@@ -1,34 +1,30 @@
-# 纪小盒 - 银行BIN码查询
+# BankBin - 银行BIN码查询
 
-<div align="center">
-
-[![GitHub stars](https://img.shields.io/github/stars/mountopjh/jixiaohe2026?style=flat-square)](https://github.com/mountopjh/jixiaohe2026/stargazers)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Author](https://img.shields.io/badge/Author-mountopjh-blue.svg)](https://github.com/mountopjh)
-
-</div>
-
----
-
+GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
 
 这是一款专用于查询银行卡 BIN 码及其归属机构的跨平台本地化工具。支持以下核心功能：
 - 桌面悬浮窗快捷键查询（选中卡号一键弹出结果）
 - 历史查询数据大盘面板
-- Bmob 云端账号验证与数据双向同步
+- 本地登录入口（不连接后台、不校验账号密码）
 - GitHub 自动检测与一键下载更新
 
 ## 🚀 使用方法
 
 ### 源码环境运行
-1. **安装环境**: 双击根目录下的 `一键安装环境并配置.bat` 脚本，它会自动创建虚拟环境并在 `venv` 中安装所需的全部 Python 依赖包。
-2. **运行程序**: 双击 `启动程序.bat` 即可启动应用，并在电脑系统托盘中找到纪小盒图标。
+1. 运行 `python -m venv .venv` 创建虚拟环境。
+2. 运行 `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` 安装依赖。
+3. 运行 `.\.venv\Scripts\python.exe main.py` 启动应用，并在系统托盘中找到 BankBin 图标。
 
 ### 一键打包与发布
-在根目录双击运行 `一键打包exe.bat` 脚本（前提是已经跑过环境安装步奏并且拥有 `venv` 环境）。
-等待进度全部走完后，会在 `dist/` 文件夹下生成一个名为 `纪小盒.exe` 的单文件可执行程序。您可以将此程序单独提取出来发送给任何人使用，纯净无依赖。
+在根目录双击运行 `build_root_exe.bat` 脚本。脚本会自动准备独立的 `.build_venv` 构建环境。
+打包完成后，单文件程序会保存在 `BankBin_Releases` 文件夹，并按 `BankBin_001.exe`、`BankBin_002.exe` 的格式自动递增编号。历史版本不会被删除或覆盖。
+
+### 版本更新
+
+软件启动后及运行期间会定时检查 GitHub Releases。发现高于当前版本的新版本时，系统托盘右键菜单的“更新”栏目会显示版本号并允许点击下载，同时弹出托盘通知。发布地址统一使用 [mountopjh/BankBin Releases](https://github.com/mountopjh/BankBin/releases)。
 
 ## 💡 技术说明
-本项目依赖本地 SQLite 存储 (`bin_database.db`) 与阿里云支付宝 API 兜底，以及通过爬虫查询的云端兜底。跨设备静默登录配置通过同级目录下生成的 `settings.json` 进行管理与本地存储。
+本项目依赖本地 SQLite 存储 (`bin_database.db`) 与阿里云支付宝 API 兜底，以及通过爬虫查询的云端兜底。登录窗口仅作为本地进入软件的入口，不连接后台，也不校验账号密码。运行时数据库、配置 (`settings.json`) 与崩溃日志统一保存在 `%APPDATA%\BankBin`，EXE 同目录仅作为只读资源位置。
 
 ---
 ## [2026-03-11] 最近更新说明
@@ -45,9 +41,9 @@
 ### BIN 码库同步
 - 同步跟踪路径已改为 `bin_database.db`，不再使用 `bank2025.2`。
 - BIN 网页查看链接：
-  - `https://github.com/mountopjh/jixiaohe2026/blob/main/bin_database.db`
+  - `https://github.com/mountopjh/BankBin/blob/main/bin_database.db`
 - BIN 直链下载地址：
-  - `https://raw.githubusercontent.com/mountopjh/jixiaohe2026/main/bin_database.db`
+  - `https://raw.githubusercontent.com/mountopjh/BankBin/main/bin_database.db`
 
 ### 更新子菜单行为（版本 / BIN）
 - 托盘“更新”子菜单会同时检查“版本更新”和“BIN码库更新”两类状态。
