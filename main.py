@@ -42,13 +42,19 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.2"
+APP_VERSION = "v1.7.3"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
 GITHUB_REPO = "mountopjh/BankBin"
 GITHUB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_COMMITS_API = f"https://api.github.com/repos/{GITHUB_REPO}/commits"
+UPDATE_MANIFEST_PATH = "update_manifest.json"
+UPDATE_MANIFEST_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{UPDATE_MANIFEST_PATH}"
+UPDATE_REQUEST_HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": f"{APP_NAME}-Updater/{APP_VERSION}",
+}
 BIN_TRACK_PATH = "bin_database.db"
 GITHUB_BIN_RAW_DB_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{BIN_TRACK_PATH}"
 GITHUB_BIN_WEB_URL = f"https://github.com/{GITHUB_REPO}/blob/main/{BIN_TRACK_PATH}"
@@ -890,8 +896,14 @@ class BinApp(QApplication):
             self._update_lock.release()
 
     def _check_release_update(self):
+        manifest = self._fetch_update_manifest()
+        if manifest is not None:
+            latest_version, release_url, release_sha256 = manifest
+            self._report_release_update(latest_version, release_url, release_sha256)
+            return
+
         try:
-            resp = requests.get(GITHUB_RELEASE_API, timeout=7)
+            resp = requests.get(GITHUB_RELEASE_API, headers=UPDATE_REQUEST_HEADERS, timeout=7)
             if resp.status_code != 200:
                 return
             data = resp.json() or {}
@@ -907,28 +919,51 @@ class BinApp(QApplication):
                         release_sha256 = digest.split(":", 1)[1]
                     break
 
-            if latest_version and release_url and self._is_newer_version(latest_version, APP_VERSION):
-                QMetaObject.invokeMethod(
-                    self,
-                    "on_version_update_found",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, latest_version),
-                    Q_ARG(str, release_url),
-                    Q_ARG(str, release_sha256),
-                )
-            else:
-                QMetaObject.invokeMethod(
-                    self,
-                    "on_version_update_checked",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, latest_version or APP_VERSION),
-                )
+            self._report_release_update(latest_version, release_url, release_sha256)
         except Exception:
             return
 
+    def _fetch_update_manifest(self):
+        try:
+            resp = requests.get(UPDATE_MANIFEST_URL, timeout=7)
+            if resp.status_code != 200:
+                return None
+            data = resp.json() or {}
+            latest_version = str(data.get("version", "")).strip().lower()
+            release_url = str(data.get("download_url", "")).strip()
+            release_sha256 = str(data.get("sha256", "")).strip().lower()
+            if not latest_version or not release_url:
+                return None
+            return latest_version, release_url, release_sha256
+        except Exception:
+            return None
+
+    def _report_release_update(self, latest_version: str, release_url: str, release_sha256: str):
+        if latest_version and release_url and self._is_newer_version(latest_version, APP_VERSION):
+            QMetaObject.invokeMethod(
+                self,
+                "on_version_update_found",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, latest_version),
+                Q_ARG(str, release_url),
+                Q_ARG(str, release_sha256),
+            )
+        else:
+            QMetaObject.invokeMethod(
+                self,
+                "on_version_update_checked",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, latest_version or APP_VERSION),
+            )
+
     def _check_bin_update(self):
         try:
-            resp = requests.get(GITHUB_COMMITS_API, params={"path": BIN_TRACK_PATH, "per_page": 1}, timeout=7)
+            resp = requests.get(
+                GITHUB_COMMITS_API,
+                headers=UPDATE_REQUEST_HEADERS,
+                params={"path": BIN_TRACK_PATH, "per_page": 1},
+                timeout=7,
+            )
             if resp.status_code != 200:
                 return
             rows = resp.json() or []

@@ -21,7 +21,7 @@ GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
 
 ### 版本更新
 
-软件启动后及运行期间会定时检查 GitHub Releases。发现高于当前版本的新版本时，系统托盘右键菜单的“更新”栏目会显示“点击下载并安装”。点击后软件会直接下载 Release 的 EXE、校验 GitHub 提供的 SHA-256 摘要（若有），由临时更新器在旧程序退出后替换原 EXE 并启动新版本；下载或校验失败时旧程序继续运行。发布地址统一使用 [mountopjh/BankBin Releases](https://github.com/mountopjh/BankBin/releases)。
+软件启动后及运行期间会定时读取仓库中的更新清单；GitHub Releases API 仅作为后备。发现高于当前版本的新版本时，系统托盘右键菜单的“更新”栏目会显示“点击下载并安装”。点击后软件会直接下载 Release 的 EXE、校验清单中的 SHA-256 摘要，由临时更新器在旧程序退出后替换原 EXE 并启动新版本；下载或校验失败时旧程序继续运行。发布地址统一使用 [mountopjh/BankBin Releases](https://github.com/mountopjh/BankBin/releases)。
 
 ## 💡 技术说明
 本项目依赖本地 SQLite 存储 (`bin_database.db`) 与阿里云支付宝 API 兜底，以及通过爬虫查询的云端兜底。登录窗口仅作为本地进入软件的入口，不连接后台，也不校验账号密码。运行时数据库、配置 (`settings.json`) 与崩溃日志统一保存在 `%APPDATA%\BankBin`，EXE 同目录仅作为只读资源位置。
