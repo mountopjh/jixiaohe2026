@@ -42,7 +42,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.3"
+APP_VERSION = "v1.7.4"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -566,6 +566,7 @@ class BinApp(QApplication):
         self._latest_release_url = ""
         self._latest_release_sha256 = ""
         self._update_installing = False
+        self._update_silent = False
         self._latest_bin_sha = ""
         self._listener_error_notified = False
         self._debug_lock = threading.Lock()
@@ -838,7 +839,7 @@ class BinApp(QApplication):
         self.action_bin_update = self.update_menu.addAction("BIN码库：检查中...")
         self.action_bin_update.setEnabled(False)
         self.action_check_update_now = self.update_menu.addAction("立即检查更新")
-        self.action_check_update_now.triggered.connect(self.trigger_update_check)
+        self.action_check_update_now.triggered.connect(self.check_and_install_update)
         self.action_sync_bin_now = self.update_menu.addAction("同步BIN码库")
         self.action_sync_bin_now.triggered.connect(self.sync_bin_database)
         self.tray_menu.addMenu(self.update_menu)
@@ -881,25 +882,35 @@ class BinApp(QApplication):
         cv.extend([0] * (size - len(cv)))
         return tuple(lv) > tuple(cv)
 
-    def trigger_update_check(self):
-        if self._update_lock.locked():
+    def check_and_install_update(self):
+        if self._update_installing:
             return
-        threading.Thread(target=self._check_github_updates, daemon=True).start()
+        if not self.trigger_update_check(install_if_available=True):
+            QTimer.singleShot(800, self.check_and_install_update)
 
-    def _check_github_updates(self):
+    def trigger_update_check(self, install_if_available: bool = False) -> bool:
         if not self._update_lock.acquire(blocking=False):
-            return
+            return False
+        threading.Thread(
+            target=self._check_github_updates,
+            args=(install_if_available,),
+            daemon=True,
+        ).start()
+        return True
+
+    def _check_github_updates(self, install_if_available: bool = False):
         try:
-            self._check_release_update()
-            self._check_bin_update()
+            self._check_release_update(install_if_available)
+            if not install_if_available:
+                self._check_bin_update()
         finally:
             self._update_lock.release()
 
-    def _check_release_update(self):
+    def _check_release_update(self, install_if_available: bool = False):
         manifest = self._fetch_update_manifest()
         if manifest is not None:
             latest_version, release_url, release_sha256 = manifest
-            self._report_release_update(latest_version, release_url, release_sha256)
+            self._report_release_update(latest_version, release_url, release_sha256, install_if_available)
             return
 
         try:
@@ -919,7 +930,7 @@ class BinApp(QApplication):
                         release_sha256 = digest.split(":", 1)[1]
                     break
 
-            self._report_release_update(latest_version, release_url, release_sha256)
+            self._report_release_update(latest_version, release_url, release_sha256, install_if_available)
         except Exception:
             return
 
@@ -938,7 +949,13 @@ class BinApp(QApplication):
         except Exception:
             return None
 
-    def _report_release_update(self, latest_version: str, release_url: str, release_sha256: str):
+    def _report_release_update(
+        self,
+        latest_version: str,
+        release_url: str,
+        release_sha256: str,
+        install_if_available: bool = False,
+    ):
         if latest_version and release_url and self._is_newer_version(latest_version, APP_VERSION):
             QMetaObject.invokeMethod(
                 self,
@@ -947,6 +964,7 @@ class BinApp(QApplication):
                 Q_ARG(str, latest_version),
                 Q_ARG(str, release_url),
                 Q_ARG(str, release_sha256),
+                Q_ARG(bool, install_if_available),
             )
         else:
             QMetaObject.invokeMethod(
@@ -954,6 +972,7 @@ class BinApp(QApplication):
                 "on_version_update_checked",
                 Qt.ConnectionType.QueuedConnection,
                 Q_ARG(str, latest_version or APP_VERSION),
+                Q_ARG(bool, install_if_available),
             )
 
     def _check_bin_update(self):
@@ -1005,8 +1024,14 @@ class BinApp(QApplication):
         except Exception:
             return
 
-    @pyqtSlot(str, str, str)
-    def on_version_update_found(self, latest_version: str, release_url: str, release_sha256: str):
+    @pyqtSlot(str, str, str, bool)
+    def on_version_update_found(
+        self,
+        latest_version: str,
+        release_url: str,
+        release_sha256: str,
+        install_if_available: bool,
+    ):
         if self._update_installing:
             return
         self._latest_release_version = latest_version
@@ -1019,6 +1044,9 @@ class BinApp(QApplication):
         except Exception:
             pass
         self.action_version_update.triggered.connect(self.install_available_update)
+        if install_if_available:
+            self.install_available_update(silent=True)
+            return
         self.tray_icon.showMessage(
             "版本更新",
             f"发现新版本 {latest_version.upper()}，点击菜单将自动下载并安装。",
@@ -1026,21 +1054,24 @@ class BinApp(QApplication):
             3000,
         )
 
-    @pyqtSlot(str)
-    def on_version_update_checked(self, latest_version: str):
+    @pyqtSlot(str, bool)
+    def on_version_update_checked(self, latest_version: str, install_if_available: bool):
         if self._update_installing:
             return
         latest_version = (latest_version or APP_VERSION).upper()
         self.action_version_update.setText(f"版本更新：当前已是最新（{latest_version}）")
         self.action_version_update.setEnabled(False)
 
-    def install_available_update(self):
+    def install_available_update(self, silent: bool = False):
         if self._update_installing:
             return
         if not self._latest_release_url:
             QMessageBox.warning(None, "自动更新", "未获取到新版本安装包，请稍后重新检查更新。")
             return
         if not getattr(sys, "frozen", False):
+            if silent:
+                self.action_version_update.setText("版本更新：源码环境无法自动安装")
+                return
             QMessageBox.information(
                 None,
                 "自动更新",
@@ -1050,14 +1081,16 @@ class BinApp(QApplication):
             return
 
         self._update_installing = True
+        self._update_silent = silent
         self.action_version_update.setText("版本更新：正在下载…")
         self.action_version_update.setEnabled(False)
-        self.tray_icon.showMessage(
-            "版本更新",
-            "正在下载新版本，下载完成后将自动关闭旧程序并启动新版本。",
-            QSystemTrayIcon.MessageIcon.Information,
-            3000,
-        )
+        if not silent:
+            self.tray_icon.showMessage(
+                "版本更新",
+                "正在下载新版本，下载完成后将自动关闭旧程序并启动新版本。",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
         threading.Thread(
             target=self._download_and_prepare_update,
             args=(self._latest_release_url, self._latest_release_sha256),
@@ -1198,12 +1231,13 @@ class BinApp(QApplication):
             return
 
         self.action_version_update.setText("版本更新：正在安装并重启…")
-        self.tray_icon.showMessage(
-            "版本更新",
-            "新版本已准备完成，正在关闭旧程序并启动新版本。",
-            QSystemTrayIcon.MessageIcon.Information,
-            2500,
-        )
+        if not self._update_silent:
+            self.tray_icon.showMessage(
+                "版本更新",
+                "新版本已准备完成，正在关闭旧程序并启动新版本。",
+                QSystemTrayIcon.MessageIcon.Information,
+                2500,
+            )
         QTimer.singleShot(350, self.quit_app)
 
     @pyqtSlot(str)
@@ -1212,7 +1246,9 @@ class BinApp(QApplication):
         version = (self._latest_release_version or "新版本").upper()
         self.action_version_update.setText(f"版本更新：发现 {version}（点击重试）")
         self.action_version_update.setEnabled(True)
-        QMessageBox.warning(None, "自动更新失败", f"未替换当前程序，旧版本仍在运行。\n\n原因：{message}")
+        if not self._update_silent:
+            QMessageBox.warning(None, "自动更新失败", f"未替换当前程序，旧版本仍在运行。\n\n原因：{message}")
+        self._update_silent = False
 
     @pyqtSlot(str, str, str, str)
     def on_bin_update_found(self, sha: str, message: str, commit_url: str, commit_date: str):
