@@ -6,7 +6,7 @@ GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
 - 桌面悬浮窗快捷键查询（选中卡号一键弹出结果）
 - 历史查询数据大盘面板
 - 本地登录入口（不连接后台、不校验账号密码）
-- GitHub 自动检测与一键下载更新
+- GitHub 自动检测与一键安装更新
 
 ## 🚀 使用方法
 
@@ -21,7 +21,7 @@ GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
 
 ### 版本更新
 
-软件启动后及运行期间会定时检查 GitHub Releases。发现高于当前版本的新版本时，系统托盘右键菜单的“更新”栏目会显示版本号并允许点击下载，同时弹出托盘通知。发布地址统一使用 [mountopjh/BankBin Releases](https://github.com/mountopjh/BankBin/releases)。
+软件启动后及运行期间会定时检查 GitHub Releases。发现高于当前版本的新版本时，系统托盘右键菜单的“更新”栏目会显示“点击下载并安装”。点击后软件会直接下载 Release 的 EXE、校验 GitHub 提供的 SHA-256 摘要（若有），由临时更新器在旧程序退出后替换原 EXE 并启动新版本；下载或校验失败时旧程序继续运行。发布地址统一使用 [mountopjh/BankBin Releases](https://github.com/mountopjh/BankBin/releases)。
 
 ## 💡 技术说明
 本项目依赖本地 SQLite 存储 (`bin_database.db`) 与阿里云支付宝 API 兜底，以及通过爬虫查询的云端兜底。登录窗口仅作为本地进入软件的入口，不连接后台，也不校验账号密码。运行时数据库、配置 (`settings.json`) 与崩溃日志统一保存在 `%APPDATA%\BankBin`，EXE 同目录仅作为只读资源位置。
@@ -47,6 +47,6 @@ GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
 
 ### 更新子菜单行为（版本 / BIN）
 - 托盘“更新”子菜单会同时检查“版本更新”和“BIN码库更新”两类状态。
-- 版本更新：发现新版本后展示版本号，并跳转 GitHub Release 下载对应 EXE。
+- 版本更新：发现新版本后展示版本号；点击后直接下载、校验并在旧程序退出后自动替换、启动对应 EXE。
 - BIN码库更新：发现 `bin_database.db` 新提交后，可在菜单中直接同步本地 BIN 文件。
 - 当只有 BIN 码库更新时，只同步 `bin_database.db`，不会触发 EXE 下载。

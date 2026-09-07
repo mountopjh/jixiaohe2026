@@ -1,6 +1,8 @@
 ﻿import ctypes
+import hashlib
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -40,7 +42,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.1"
+APP_VERSION = "v1.7.2"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -51,6 +53,8 @@ BIN_TRACK_PATH = "bin_database.db"
 GITHUB_BIN_RAW_DB_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{BIN_TRACK_PATH}"
 GITHUB_BIN_WEB_URL = f"https://github.com/{GITHUB_REPO}/blob/main/{BIN_TRACK_PATH}"
 UPDATE_INTERVAL_MS = 5 * 60 * 1000
+UPDATE_DOWNLOAD_TIMEOUT = (8, 45)
+UPDATE_DOWNLOAD_CHUNK_SIZE = 512 * 1024
 
 
 def format_now_seconds() -> str:
@@ -552,7 +556,10 @@ class BinApp(QApplication):
         self._hotkey_handle = None
         self._mouse_listener = None
         self._update_lock = threading.Lock()
+        self._latest_release_version = ""
         self._latest_release_url = ""
+        self._latest_release_sha256 = ""
+        self._update_installing = False
         self._latest_bin_sha = ""
         self._listener_error_notified = False
         self._debug_lock = threading.Lock()
@@ -889,20 +896,25 @@ class BinApp(QApplication):
                 return
             data = resp.json() or {}
             latest_version = str(data.get("tag_name", "")).strip().lower()
-            release_url = data.get("html_url", "")
+            release_url = ""
+            release_sha256 = ""
             for asset in data.get("assets", []):
                 name = str(asset.get("name", "")).lower()
                 if name.endswith(".exe"):
-                    release_url = asset.get("browser_download_url", release_url)
+                    release_url = str(asset.get("browser_download_url", "")).strip()
+                    digest = str(asset.get("digest", "")).strip().lower()
+                    if digest.startswith("sha256:"):
+                        release_sha256 = digest.split(":", 1)[1]
                     break
 
-            if latest_version and self._is_newer_version(latest_version, APP_VERSION):
+            if latest_version and release_url and self._is_newer_version(latest_version, APP_VERSION):
                 QMetaObject.invokeMethod(
                     self,
                     "on_version_update_found",
                     Qt.ConnectionType.QueuedConnection,
                     Q_ARG(str, latest_version),
                     Q_ARG(str, release_url),
+                    Q_ARG(str, release_sha256),
                 )
             else:
                 QMetaObject.invokeMethod(
@@ -958,28 +970,214 @@ class BinApp(QApplication):
         except Exception:
             return
 
-    @pyqtSlot(str, str)
-    def on_version_update_found(self, latest_version: str, release_url: str):
+    @pyqtSlot(str, str, str)
+    def on_version_update_found(self, latest_version: str, release_url: str, release_sha256: str):
+        if self._update_installing:
+            return
+        self._latest_release_version = latest_version
         self._latest_release_url = release_url
-        self.action_version_update.setText(f"版本更新：发现 {latest_version.upper()}（点击下载）")
+        self._latest_release_sha256 = release_sha256
+        self.action_version_update.setText(f"版本更新：发现 {latest_version.upper()}（点击下载并安装）")
         self.action_version_update.setEnabled(True)
         try:
             self.action_version_update.triggered.disconnect()
         except Exception:
             pass
-        self.action_version_update.triggered.connect(lambda: webbrowser.open(self._latest_release_url))
+        self.action_version_update.triggered.connect(self.install_available_update)
         self.tray_icon.showMessage(
             "版本更新",
-            f"发现新版本 {latest_version.upper()}，请点击菜单更新。",
+            f"发现新版本 {latest_version.upper()}，点击菜单将自动下载并安装。",
             QSystemTrayIcon.MessageIcon.Information,
             3000,
         )
 
     @pyqtSlot(str)
     def on_version_update_checked(self, latest_version: str):
+        if self._update_installing:
+            return
         latest_version = (latest_version or APP_VERSION).upper()
         self.action_version_update.setText(f"版本更新：当前已是最新（{latest_version}）")
         self.action_version_update.setEnabled(False)
+
+    def install_available_update(self):
+        if self._update_installing:
+            return
+        if not self._latest_release_url:
+            QMessageBox.warning(None, "自动更新", "未获取到新版本安装包，请稍后重新检查更新。")
+            return
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                None,
+                "自动更新",
+                "当前为源代码运行环境，不能替换 Python 解释器。将打开新版本下载地址。",
+            )
+            webbrowser.open(self._latest_release_url)
+            return
+
+        self._update_installing = True
+        self.action_version_update.setText("版本更新：正在下载…")
+        self.action_version_update.setEnabled(False)
+        self.tray_icon.showMessage(
+            "版本更新",
+            "正在下载新版本，下载完成后将自动关闭旧程序并启动新版本。",
+            QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
+        threading.Thread(
+            target=self._download_and_prepare_update,
+            args=(self._latest_release_url, self._latest_release_sha256),
+            daemon=True,
+            name="BankBinUpdateDownloader",
+        ).start()
+
+    def _download_and_prepare_update(self, download_url: str, expected_sha256: str):
+        update_dir = ""
+        download_path = ""
+        helper_path = ""
+        try:
+            target_path = os.path.abspath(sys.executable)
+            if not target_path.lower().endswith(".exe"):
+                raise RuntimeError("当前运行文件不是可更新的 EXE。")
+
+            update_dir = tempfile.mkdtemp(prefix="bankbin_update_")
+            download_path = os.path.join(update_dir, "BankBin_update.exe")
+            hasher = hashlib.sha256()
+            downloaded = 0
+            last_percent = -1
+
+            with requests.get(download_url, stream=True, timeout=UPDATE_DOWNLOAD_TIMEOUT) as resp:
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length", "0") or 0)
+                with open(download_path, "wb") as file:
+                    for chunk in resp.iter_content(chunk_size=UPDATE_DOWNLOAD_CHUNK_SIZE):
+                        if not chunk:
+                            continue
+                        file.write(chunk)
+                        hasher.update(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            percent = min(99, int(downloaded * 100 / total))
+                            if percent != last_percent:
+                                last_percent = percent
+                                QMetaObject.invokeMethod(
+                                    self,
+                                    "on_update_download_progress",
+                                    Qt.ConnectionType.QueuedConnection,
+                                    Q_ARG(int, percent),
+                                )
+
+            if downloaded < 4096:
+                raise RuntimeError("下载的安装包过小，已停止更新。")
+            with open(download_path, "rb") as file:
+                if file.read(2) != b"MZ":
+                    raise RuntimeError("下载内容不是有效的 Windows 安装包。")
+
+            actual_sha256 = hasher.hexdigest().lower()
+            expected_sha256 = re.sub(r"^sha256:", "", expected_sha256 or "", flags=re.IGNORECASE).lower()
+            if expected_sha256 and actual_sha256 != expected_sha256:
+                raise RuntimeError("安装包 SHA-256 校验失败，已停止更新。")
+
+            helper_path = self._write_update_helper(download_path, target_path)
+            QMetaObject.invokeMethod(
+                self,
+                "on_update_download_ready",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, helper_path),
+            )
+        except Exception as exc:
+            for path in (helper_path, download_path):
+                try:
+                    if path and os.path.isfile(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+            try:
+                if update_dir and os.path.isdir(update_dir):
+                    os.rmdir(update_dir)
+            except OSError:
+                pass
+            QMetaObject.invokeMethod(
+                self,
+                "on_update_install_failed",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, str(exc)),
+            )
+
+    @staticmethod
+    def _batch_path_value(path: str) -> str:
+        return os.path.abspath(path).replace("%", "%%")
+
+    def _write_update_helper(self, download_path: str, target_path: str) -> str:
+        helper_path = os.path.join(os.path.dirname(download_path), "install_update.cmd")
+        source_value = self._batch_path_value(download_path)
+        target_value = self._batch_path_value(target_path)
+        script = "\r\n".join(
+            [
+                "@echo off",
+                "setlocal EnableExtensions DisableDelayedExpansion",
+                f'set "SOURCE={source_value}"',
+                f'set "TARGET={target_value}"',
+                "set /a ATTEMPTS=0",
+                ":copy_again",
+                'copy /Y "%SOURCE%" "%TARGET%" >nul',
+                "if not errorlevel 1 goto start_app",
+                "set /a ATTEMPTS+=1",
+                "if %ATTEMPTS% GEQ 30 goto start_from_download",
+                "timeout /t 1 /nobreak >nul",
+                "goto copy_again",
+                ":start_app",
+                'start "" "%TARGET%"',
+                'del "%SOURCE%" >nul 2>nul',
+                'del "%~f0" >nul 2>nul',
+                "exit /b 0",
+                ":start_from_download",
+                'start "" "%SOURCE%"',
+                'del "%~f0" >nul 2>nul',
+                "exit /b 1",
+                "",
+            ]
+        )
+        with open(helper_path, "w", encoding="mbcs", newline="") as file:
+            file.write(script)
+        return helper_path
+
+    @pyqtSlot(int)
+    def on_update_download_progress(self, percent: int):
+        if self._update_installing:
+            self.action_version_update.setText(f"版本更新：正在下载 {percent}%")
+
+    @pyqtSlot(str)
+    def on_update_download_ready(self, helper_path: str):
+        try:
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+            subprocess.Popen(
+                ["cmd.exe", "/c", helper_path],
+                cwd=os.path.dirname(helper_path),
+                close_fds=True,
+                creationflags=creationflags,
+            )
+        except Exception as exc:
+            self.on_update_install_failed(str(exc))
+            return
+
+        self.action_version_update.setText("版本更新：正在安装并重启…")
+        self.tray_icon.showMessage(
+            "版本更新",
+            "新版本已准备完成，正在关闭旧程序并启动新版本。",
+            QSystemTrayIcon.MessageIcon.Information,
+            2500,
+        )
+        QTimer.singleShot(350, self.quit_app)
+
+    @pyqtSlot(str)
+    def on_update_install_failed(self, message: str):
+        self._update_installing = False
+        version = (self._latest_release_version or "新版本").upper()
+        self.action_version_update.setText(f"版本更新：发现 {version}（点击重试）")
+        self.action_version_update.setEnabled(True)
+        QMessageBox.warning(None, "自动更新失败", f"未替换当前程序，旧版本仍在运行。\n\n原因：{message}")
 
     @pyqtSlot(str, str, str, str)
     def on_bin_update_found(self, sha: str, message: str, commit_url: str, commit_date: str):
