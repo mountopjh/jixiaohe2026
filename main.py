@@ -40,7 +40,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.0"
+APP_VERSION = "v1.7.1"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -835,9 +835,6 @@ class BinApp(QApplication):
         self.about_menu = QMenu(f"关于 - {APP_NAME} {APP_VERSION.upper()}", self.tray_menu)
         self.act_curr_ver = self.about_menu.addAction(f"当前版本: {APP_VERSION.upper()}")
         self.act_curr_ver.setEnabled(False)
-        self.about_menu.addSeparator()
-        self.act_feedback = self.about_menu.addAction("反馈联系微信：jhzxhy2023")
-        self.act_feedback.triggered.connect(self.copy_feedback_wechat)
         self.tray_menu.addMenu(self.about_menu)
 
         self.action_time = self.tray_menu.addAction("更新时间: 2026-09-07")
@@ -858,11 +855,6 @@ class BinApp(QApplication):
         self.update_timer.timeout.connect(self.trigger_update_check)
         self.update_timer.start()
         self.trigger_update_check()
-
-    def copy_feedback_wechat(self):
-        wechat = "jhzxhy2023"
-        self.clipboard().setText(wechat)
-        self.tray_icon.showMessage("反馈微信", f"已复制微信号: {wechat}", QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _parse_version(self, version_text: str):
         nums = [int(x) for x in re.findall(r"\d+", version_text or "")]
